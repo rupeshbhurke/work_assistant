@@ -37,7 +37,10 @@ class CheckpointManager:
             'total_commits': 0,
             'current_repo': None,  # Currently analyzing repo path
             'current_repo_commit': 0,  # Commit count in current repo
-            'current_repo_partial_stats': None  # Partial stats for current repo
+            'current_repo_partial_stats': None,  # Partial stats for current repo
+            'analyzed_commit_shas': {},  # SHA -> first repo that analyzed it (for deduplication)
+            'unique_commits': 0,  # Count of unique commits across all repos
+            'duplicate_commits': 0  # Count of duplicate commits found
         }
         self.load()
     
@@ -67,7 +70,10 @@ class CheckpointManager:
                     'total_commits': 0,
                     'current_repo': None,
                     'current_repo_commit': 0,
-                    'current_repo_partial_stats': None
+                    'current_repo_partial_stats': None,
+                    'analyzed_commit_shas': {},
+                    'unique_commits': 0,
+                    'duplicate_commits': 0
                 }
                 self.last_save_time = time.time()
     
@@ -163,7 +169,10 @@ class CheckpointManager:
             'total_commits': 0,
             'current_repo': None,
             'current_repo_commit': 0,
-            'current_repo_partial_stats': None
+            'current_repo_partial_stats': None,
+            'analyzed_commit_shas': {},
+            'unique_commits': 0,
+            'duplicate_commits': 0
         }
         self.last_save_time = time.time()
     
@@ -431,6 +440,11 @@ def analyze_git_repo(repo_path: Path, progress_callback=None, checkpoint=None, r
         except:
             pass
         
+        # Get global analyzed commit SHAs for deduplication
+        analyzed_shas = checkpoint.data.get('analyzed_commit_shas', {}) if checkpoint else {}
+        new_commits = 0
+        duplicate_commits = 0
+        
         # Initialize or resume from partial stats
         if partial_stats:
             stats = partial_stats.copy()
@@ -479,6 +493,18 @@ def analyze_git_repo(repo_path: Path, progress_callback=None, checkpoint=None, r
                     if commit_date <= analyzed_date:
                         # All remaining commits are older, stop processing
                         break
+                
+                # Check if this commit was already analyzed in another repo (deduplication)
+                commit_sha = commit.hexsha
+                if commit_sha in analyzed_shas:
+                    duplicate_commits += 1
+                    # Skip detailed analysis but count the commit
+                    continue
+                else:
+                    new_commits += 1
+                    # Mark this commit as analyzed
+                    if checkpoint:
+                        analyzed_shas[commit_sha] = str(repo_path)
                 
                 authors.add(str(commit.author))
                 total_message_size += len(commit.message.encode('utf-8'))
@@ -537,15 +563,23 @@ def analyze_git_repo(repo_path: Path, progress_callback=None, checkpoint=None, r
         
         # Calculate final statistics
         stats['num_commits'] = commit_count
+        stats['num_commits_unique'] = new_commits  # New unique commits in this repo
+        stats['num_commits_duplicate'] = duplicate_commits  # Commits already seen in other repos
         stats['num_authors'] = len(authors)
         stats['total_commit_message_size'] = total_message_size
         stats['total_file_changes'] = total_file_changes
         stats['largest_commit'] = largest_commit
-        stats['avg_commit_message_size'] = total_message_size / commit_count if commit_count > 0 else 0
+        stats['avg_commit_message_size'] = total_message_size / new_commits if new_commits > 0 else 0
         stats['commits_by_author'] = dict(stats.get('commits_by_author', {}))
         stats['file_types'] = dict(file_types)
         stats['last_commit_date'] = latest_commit_date
         stats['last_analyzed_date'] = datetime.now().isoformat()
+        
+        # Update global deduplication stats
+        if checkpoint:
+            checkpoint.data['analyzed_commit_shas'] = analyzed_shas
+            checkpoint.data['unique_commits'] = len(analyzed_shas)
+            checkpoint.data['duplicate_commits'] = checkpoint.data.get('duplicate_commits', 0) + duplicate_commits
         
         # Remove temporary fields used for resume
         stats.pop('authors_list', None)
@@ -839,19 +873,127 @@ def main():
     print("📊 Phase 2: Detailed analysis of Git repositories...", flush=True)
     print(flush=True)
     
+    # Sort repos by commit count (smallest first) for faster initial results
+    all_git_repos_sorted = sorted(all_git_repos, key=lambda r: r.get('commit_count', 0))
+    print(f"   Processing repos from smallest to largest (by commit count)", flush=True)
+    print(flush=True)
+    
     analyzed_commits_so_far = sum(r.get('num_commits', 0) for r in git_repos)
-    progress = ProgressTracker(len(all_git_repos), total_commits)
-    progress.analyzed_repos = len(git_repos)  # Start from already analyzed count
-    progress.analyzed_commits = analyzed_commits_so_far  # Start from already analyzed commits
+    progress = ProgressTracker(len(all_git_repos_sorted), total_commits)
+    progress.analyzed_commits = analyzed_commits_so_far
+    progress.analyzed_repos = len(git_repos)
     progress.start_updater()
     
     try:
-        for location in locations:
-            if not location.exists():
+        # Process repos in sorted order (smallest first)
+        analyzed_paths = checkpoint.get_analyzed_paths()
+        
+        for repo_info in all_git_repos_sorted:
+            repo_path = Path(repo_info['path'])
+            
+            if not repo_path.exists():
                 continue
             
-            print(f"🔎 Analyzing: {location}", flush=True)
-            scan_directory_recursive(location, git_repos, non_git_projects, progress, checkpoint, total_commits)
+            item_path = str(repo_path)
+            
+            # Check if already analyzed and if repo has new commits
+            if item_path in analyzed_paths:
+                # Get existing analysis
+                existing_repo = None
+                for repo in checkpoint.data['analyzed_repos']:
+                    if repo['path'] == item_path:
+                        existing_repo = repo
+                        break
+                
+                if existing_repo:
+                    # Check if repo has new commits
+                    try:
+                        repo_obj = git.Repo(repo_path)
+                        latest_commit = next(repo_obj.iter_commits(max_count=1))
+                        latest_commit_date = datetime.fromtimestamp(latest_commit.committed_date).isoformat()
+                        last_analyzed_date = existing_repo.get('last_analyzed_date')
+                        
+                        if last_analyzed_date and latest_commit_date <= existing_repo.get('last_commit_date', ''):
+                            # No new commits, skip
+                            print(f"\n⏭️  Skipping (no new commits): {repo_path.name}", flush=True)
+                            git_repos.append(existing_repo)
+                            progress.increment_analyzed(existing_repo.get('num_commits', 0))
+                            continue
+                        else:
+                            # Has new commits, re-analyze with smart update
+                            print(f"\n🔄 Updating (new commits detected): {repo_path.name}", flush=True)
+                            print(f"   Last analyzed: {last_analyzed_date}", flush=True)
+                            print(f"   Latest commit: {latest_commit_date}", flush=True)
+                    except:
+                        # Error checking, skip
+                        print(f"\n⏭️  Skipping (already analyzed): {repo_path.name}", flush=True)
+                        git_repos.append(existing_repo)
+                        progress.increment_analyzed(existing_repo.get('num_commits', 0))
+                        continue
+            
+            # Analyze this repo
+            analyzed_so_far = sum(r.get('num_commits', 0) for r in git_repos)
+            repo_commit_count = repo_info.get('commit_count', 0)
+            
+            # Check if this is the repo we were analyzing
+            current_repo_path, current_repo_commit, partial_stats = checkpoint.get_current_repo()
+            resume_from = 0
+            last_analyzed_date = None
+            
+            # Check if we have existing analysis for smart update
+            for repo in checkpoint.data['analyzed_repos']:
+                if repo['path'] == item_path:
+                    last_analyzed_date = repo.get('last_analyzed_date')
+                    break
+            
+            if current_repo_path == item_path:
+                resume_from = current_repo_commit
+                print(f"\n🔄 Resuming analysis: {repo_path.name} from commit {resume_from}", flush=True)
+            elif last_analyzed_date:
+                # Re-analyzing with smart update
+                partial_stats = None
+            else:
+                print(f"\n� Analyzing: {repo_path.name}", flush=True)
+                partial_stats = None
+            
+            if total_commits > 0:
+                print(f"   Commits: {repo_commit_count:,} / {total_commits:,} total ({(repo_commit_count/total_commits*100):.1f}% of total)", flush=True)
+                print(f"   Progress: {analyzed_so_far:,} / {total_commits:,} commits analyzed ({(analyzed_so_far/total_commits*100):.1f}%)", flush=True)
+            else:
+                print(f"   Commits: {repo_commit_count:,}", flush=True)
+                print(f"   Progress: {analyzed_so_far:,} commits analyzed", flush=True)
+            
+            # Set current repo in checkpoint and progress tracker
+            checkpoint.set_current_repo(item_path, resume_from, partial_stats)
+            progress.set_current_repo(repo_path.name)
+            
+            # Progress callback to update commits during analysis
+            def progress_callback(commits_processed):
+                current_total = analyzed_so_far + commits_processed
+                progress.update_commits(current_total)
+            
+            stats = analyze_git_repo(repo_path, progress_callback=progress_callback, checkpoint=checkpoint, resume_from_commit=resume_from, partial_stats=partial_stats, last_analyzed_date=last_analyzed_date)
+            git_repos.append(stats)
+            
+            # Calculate and display incremental storage for this repo
+            if 'error' not in stats:
+                repo_storage = estimate_db_storage([stats])
+                running_total_storage = estimate_db_storage(git_repos)
+                
+                unique = stats.get('num_commits_unique', stats['num_commits'])
+                dups = stats.get('num_commits_duplicate', 0)
+                
+                print(f"   ✅ Complete: {stats['num_commits']} commits ({unique} unique, {dups} duplicates), {stats['num_authors']} authors, {stats['total_file_changes']:,} file changes", flush=True)
+                print(f"   💾 Storage: {repo_storage['total_storage_mb']:.2f} MB (commits: {repo_storage['commits_storage_mb']:.2f} MB, messages: {repo_storage['messages_storage_mb']:.2f} MB, files: {repo_storage['file_changes_storage_mb']:.2f} MB)", flush=True)
+                print(f"   📊 Running total: {running_total_storage['total_storage_mb']:.2f} MB ({running_total_storage['total_storage_gb']:.3f} GB)", flush=True)
+                
+                if dups > 0:
+                    print(f"   🔄 Deduplication: Skipped {dups} commits already analyzed in other repos", flush=True)
+            
+            checkpoint.save_repo_analysis(stats)
+            checkpoint.clear_current_repo()
+            progress.clear_current_repo()
+            progress.increment_analyzed(stats.get('num_commits', 0))
     finally:
         progress.stop_updater()
     
@@ -876,10 +1018,20 @@ def main():
     
     # Summary
     print(f"Total locations scanned: {len(locations)}", flush=True)
-    print(f"Git repositories found: {len(all_git_repos)}", flush=True)
+    print(f"Git repositories found: {len(all_git_repos_sorted)}", flush=True)
     print(f"Git repositories analyzed: {len(git_repos)}", flush=True)
     print(f"Non-git projects excluded: {len(non_git_projects)}", flush=True)
     print(flush=True)
+    
+    # Deduplication summary
+    unique_commits = checkpoint.data.get('unique_commits', 0)
+    duplicate_commits = checkpoint.data.get('duplicate_commits', 0)
+    if duplicate_commits > 0:
+        print(f"🔄 Deduplication Summary:", flush=True)
+        print(f"   Unique commits analyzed: {unique_commits:,}", flush=True)
+        print(f"   Duplicate commits skipped: {duplicate_commits:,}", flush=True)
+        print(f"   Deduplication ratio: {(duplicate_commits/(unique_commits+duplicate_commits)*100):.1f}%", flush=True)
+        print(flush=True)
     
     if non_git_projects:
         print(f"Excluded non-git projects: {', '.join([Path(p).name for p in non_git_projects[:10]])}", flush=True)
