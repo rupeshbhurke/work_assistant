@@ -10,6 +10,7 @@ from workassistant.models.file_index import FileIndex
 from workassistant.models.scan_job import ScanJob
 from workassistant.models.project_graph import ProjectGraph
 from workassistant.models.chat_message import ChatMessage
+from workassistant.models.conversation import Conversation
 
 __all__ = [
     "Base",
@@ -24,4 +25,5 @@ __all__ = [
     "ScanJob",
     "ProjectGraph",
     "ChatMessage",
+    "Conversation",
 ]
