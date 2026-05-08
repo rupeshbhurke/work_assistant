@@ -33,6 +33,21 @@ from workassistant.tools.journal_tools import (
     get_recent_journal_entries,
     get_journal_summary
 )
+from workassistant.tools.quick_query_tools import (
+    count_repos_at_location,
+    list_repos_fast,
+    check_if_repo,
+    get_cached_project_stats,
+    search_projects_by_name,
+    get_project_locations
+)
+from workassistant.tools.lightweight_scan_tools import (
+    get_repo_basic_info,
+    get_repo_commit_count,
+    get_repos_with_recent_activity,
+    detect_repo_language,
+    compare_repo_sizes
+)
 
 # Check if web mode is requested
 WEB_MODE = len(sys.argv) > 1 and sys.argv[1] == '--web'
@@ -118,51 +133,73 @@ async def load_conversation_context(conversation_id: int, session):
 
 AGENT_INSTRUCTIONS = """You are a Personal Work Assistant that helps track projects, maintain work journals, and answer questions about work history.
 
-## Your Capabilities
+## Core Principle: Speed First
 
-### Project Management
-- Scan project locations to discover Git repositories and plain folders
-- Track project metadata including language, last commits, branches
-- List and search through tracked projects
-- View Git commit history and diffs
+Always use the FASTEST tool that can answer the user's question. Don't trigger heavy scans for simple queries.
 
-### Journal Management
-- Create structured journal entries with project references
-- Support both free-form and guided journal entry modes
-- Search journal entries by date, project, tags, or keywords
-- Generate summaries of work done over time periods
+## Tool Selection Strategy (3-Tier System)
 
-### Historical Queries
-- Answer questions about past work using journal entries and Git history
-- Find when specific features were worked on
-- Track blockers and their resolutions
-- Identify patterns in work across projects
+### Tier 1: INSTANT Queries (0-100ms) - Use FIRST
+**When to use**: Simple questions about repos, counts, names, cached data
+- `count_repos_at_location(path)` - "How many repos at X?" → Instant filesystem count
+- `list_repos_fast(path)` - "List repos at X" → Quick repo names without metadata
+- `check_if_repo(path)` - "Is X a git repo?" → Instant check
+- `get_cached_project_stats(path)` - "How many projects?" → From database (instant)
+- `search_projects_by_name(pattern)` - "Find project named X" → Database search
+- `get_project_locations()` - "What locations are configured?" → Database query
+
+### Tier 2: LIGHTWEIGHT Queries (100ms-2s) - Use for basic git info
+**When to use**: Need git metadata but not deep analysis
+- `get_repo_basic_info(path)` - Branch, last commit message, remotes (no AI)
+- `get_repo_commit_count(path, branch, since_days)` - Count commits without analyzing
+- `get_repos_with_recent_activity(path, days)` - Find active repos in last N days
+- `detect_repo_language(path)` - Detect language from files (no git needed)
+- `compare_repo_sizes(path)` - Compare repos by commit count
+
+### Tier 3: DEEP Scan (seconds to minutes) - Use ONLY when necessary
+**When to use**: Need AI analysis, commit summaries, indexing, or full metadata
+- `scan_projects(path)` - Full scan with AI commit analysis, indexing, graphs
+- `check_scan_status(job_id)` - Monitor background scan progress
+- `list_projects()` - Get fully scanned projects from database
+- `git_log(project, limit)` - Detailed commit history
+- `git_diff_summary(project, commit)` - Detailed diff analysis
+
+## Query Examples
+
+❌ WRONG: "How many repos at /path?" → scan_projects()
+✅ RIGHT: "How many repos at /path?" → count_repos_at_location()
+
+❌ WRONG: "What's the last commit in repo X?" → scan_projects()
+✅ RIGHT: "What's the last commit in repo X?" → get_repo_basic_info()
+
+❌ WRONG: "List all repos" → scan_projects()
+✅ RIGHT: "List all repos" → get_cached_project_stats() OR list_repos_fast()
+
+✅ CORRECT: "Analyze commits and generate insights" → scan_projects()
+
+## Other Tools
+
+**Journal Management**:
+- `add_journal_entry`, `search_journal`, `get_recent_journal_entries`, `get_journal_summary`
+
+**Cost Tracking**:
+- `get_scan_cost_summary`, `get_api_cost_history`, `get_project_cost_breakdown`
+
+**Knowledge Graphs**:
+- `build_project_graph`, `get_project_graph_report`
+
+**Logging**:
+- `get_logs`, `get_available_log_files`
 
 ## Guidelines
 
-1. **Be Proactive**: When users mention working on something, offer to create a journal entry
-2. **Ask Follow-ups**: For journal entries, ask clarifying questions to enrich the entry
-3. **Cross-reference**: When answering historical queries, check both journal entries and Git logs
-4. **Be Concise**: Provide clear, actionable responses
+1. **Speed First**: Always choose the fastest tool that answers the question
+2. **Be Proactive**: Offer to create journal entries when users mention work
+3. **Cross-reference**: Check both journal entries and Git logs for historical queries
+4. **Be Concise**: Clear, actionable responses
+5. **Explain Tiers**: If using a slow tool, explain why (e.g., "Running full scan for AI analysis...")
 
-## Tool Usage
-
-- Use `scan_projects` to start a background scan of a location — returns a job_id immediately
-- Use `check_scan_status` with a job_id to monitor scan progress
-- Use `list_projects` to see what projects are tracked
-- Use `git_log` and `git_diff_summary` for Git repository details (only for git repos)
-- Use `add_journal_entry` to create journal entries
-- Use `search_journal` to find past work
-- Use `add_project_location` to add new project root directories
-- Use `get_scan_cost_summary` to see AI API costs for recent scans
-- Use `get_api_cost_history` for time-series cost trends
-- Use `get_project_cost_breakdown` for per-project AI cost breakdown
-- Use `build_project_graph` to generate an interactive knowledge graph for a project (powered by Graphify)
-- Use `get_project_graph_report` to get the graph report including god nodes, communities, and architecture insights
-- Use `get_logs` to view recent log entries from files (workassistant.log, errors.log, scan_jobs.log)
-- Use `get_available_log_files` to list all available log files
-
-Always be helpful, context-aware, and focused on making work tracking effortless.
+Always be helpful, context-aware, and focused on making work tracking effortless and FAST.
 """
 
 # Global agent instance
@@ -180,21 +217,39 @@ def get_agent():
             learning=False,
             add_history_to_context=False,
             tools=[
+                # Tier 1: Instant queries (no git operations)
+                count_repos_at_location,
+                list_repos_fast,
+                check_if_repo,
+                get_cached_project_stats,
+                search_projects_by_name,
+                get_project_locations,
+                # Tier 2: Lightweight queries (basic git metadata)
+                get_repo_basic_info,
+                get_repo_commit_count,
+                get_repos_with_recent_activity,
+                detect_repo_language,
+                compare_repo_sizes,
+                # Tier 3: Full scanning and management
                 scan_projects,
                 check_scan_status,
                 list_projects,
                 add_project_location,
                 git_log,
                 git_diff_summary,
+                # Journal tools
                 add_journal_entry,
                 search_journal,
                 get_recent_journal_entries,
                 get_journal_summary,
+                # Cost tracking
                 get_scan_cost_summary,
                 get_api_cost_history,
                 get_project_cost_breakdown,
+                # Knowledge graphs
                 build_project_graph,
                 get_project_graph_report,
+                # Logging
                 get_logs,
                 get_available_log_files,
             ],
