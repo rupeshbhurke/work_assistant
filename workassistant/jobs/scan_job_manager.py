@@ -6,6 +6,7 @@ import asyncio
 import uuid
 import logging
 from datetime import datetime, timezone
+from pathlib import Path
 from typing import Dict, Optional
 
 logger = logging.getLogger(__name__)
@@ -121,7 +122,6 @@ class ScanJobManager:
 
         try:
             # Phase 1: Discovery - find all projects
-            from pathlib import Path
             from workassistant.models.project_location import ProjectLocation
             
             async with async_session_maker() as session:
