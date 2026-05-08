@@ -922,6 +922,86 @@ if WEB_MODE:
                 for msg in messages
             ]
     
+    @app.get("/messages/{message_id}/replies")
+    async def get_message_replies(message_id: int):
+        """Get all replies to a specific message."""
+        from sqlalchemy import select
+        from workassistant.models.chat_message import ChatMessage
+        from workassistant.database import async_session_maker
+        
+        async with async_session_maker() as session:
+            result = await session.execute(
+                select(ChatMessage)
+                .where(ChatMessage.parent_message_id == message_id)
+                .order_by(ChatMessage.created_at.asc())
+            )
+            messages = result.scalars().all()
+            
+            return [
+                {
+                    "id": msg.id,
+                    "conversation_id": msg.conversation_id,
+                    "parent_message_id": msg.parent_message_id,
+                    "is_user": msg.is_user,
+                    "content": msg.content,
+                    "input_tokens": msg.input_tokens,
+                    "output_tokens": msg.output_tokens,
+                    "total_tokens": msg.total_tokens,
+                    "cost": msg.cost_usd,
+                    "model": msg.model,
+                    "created_at": msg.created_at.isoformat() if msg.created_at else None
+                }
+                for msg in messages
+            ]
+    
+    @app.get("/messages/{message_id}/thread")
+    async def get_message_thread(message_id: int):
+        """Get the full thread for a message (parent and all replies recursively)."""
+        from sqlalchemy import select
+        from workassistant.models.chat_message import ChatMessage
+        from workassistant.database import async_session_maker
+        
+        async def get_thread_recursive(msg_id, session):
+            """Recursively get message thread."""
+            result = await session.execute(
+                select(ChatMessage).where(ChatMessage.id == msg_id)
+            )
+            msg = result.scalar_one_or_none()
+            if not msg:
+                return None
+            
+            thread = {
+                "id": msg.id,
+                "conversation_id": msg.conversation_id,
+                "parent_message_id": msg.parent_message_id,
+                "is_user": msg.is_user,
+                "content": msg.content,
+                "input_tokens": msg.input_tokens,
+                "output_tokens": msg.output_tokens,
+                "total_tokens": msg.total_tokens,
+                "cost": msg.cost_usd,
+                "model": msg.model,
+                "created_at": msg.created_at.isoformat() if msg.created_at else None,
+                "replies": []
+            }
+            
+            # Get replies
+            replies_result = await session.execute(
+                select(ChatMessage)
+                .where(ChatMessage.parent_message_id == msg_id)
+                .order_by(ChatMessage.created_at.asc())
+            )
+            replies = replies_result.scalars().all()
+            
+            for reply in replies:
+                reply_thread = await get_thread_recursive(reply.id, session)
+                thread["replies"].append(reply_thread)
+            
+            return thread
+        
+        async with async_session_maker() as session:
+            return await get_thread_recursive(message_id, session)
+    
     async def run_web():
         """Run the web server."""
         print(f"🚀 Starting Work Assistant Web UI...")
