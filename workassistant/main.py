@@ -69,6 +69,29 @@ def format_cost(cost: float) -> str:
         return f"${cost:.4f}"
     return f"${cost:.2f}"
 
+def generate_conversation_title(message: str) -> str:
+    """Generate a concise title from the first message of a conversation."""
+    # Remove common prefixes
+    message = message.strip()
+    prefixes_to_remove = ["can you", "please", "i want to", "i need to", "help me"]
+    for prefix in prefixes_to_remove:
+        if message.lower().startswith(prefix):
+            message = message[len(prefix):].strip()
+    
+    # Capitalize first letter
+    if message:
+        message = message[0].upper() + message[1:]
+    
+    # Truncate if too long
+    if len(message) > 100:
+        message = message[:97] + "..."
+    
+    # Remove trailing punctuation
+    while message and message[-1] in [".", "?", "!"]:
+        message = message[:-1]
+    
+    return message or "New Conversation"
+
 AGENT_INSTRUCTIONS = """You are a Personal Work Assistant that helps track projects, maintain work journals, and answer questions about work history.
 
 ## Your Capabilities
@@ -162,6 +185,8 @@ if WEB_MODE:
     
     class ChatRequest(BaseModel):
         message: str
+        conversation_id: int = None
+        parent_message_id: int = None
     
     class ChatResponse(BaseModel):
         response: str
@@ -170,6 +195,7 @@ if WEB_MODE:
         total_tokens: int
         cost: str
         model: str
+        conversation_id: int = None
     
     HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -672,7 +698,9 @@ if WEB_MODE:
         from datetime import datetime, timezone
         from workassistant.models.ai_api_call import AIApiCall
         from workassistant.models.chat_message import ChatMessage
+        from workassistant.models.conversation import Conversation
         from workassistant.database import async_session_maker
+        from sqlalchemy import select
         
         request_time = datetime.now(timezone.utc)
         agent_instance = get_agent()
@@ -688,10 +716,36 @@ if WEB_MODE:
         duration_ms = int((response_time - request_time).total_seconds() * 1000)
         
         # Log API call to database
+        conversation_id = None
         try:
             async with async_session_maker() as session:
+                # Handle conversation
+                if request.conversation_id:
+                    # Use existing conversation
+                    conversation_id = request.conversation_id
+                    # Update conversation timestamp
+                    result = await session.execute(
+                        select(Conversation).where(Conversation.id == conversation_id)
+                    )
+                    conversation = result.scalar_one_or_none()
+                    if conversation:
+                        conversation.updated_at = response_time
+                else:
+                    # Create new conversation
+                    title = generate_conversation_title(request.message)
+                    conversation = Conversation(
+                        title=title,
+                        created_at=request_time,
+                        updated_at=response_time
+                    )
+                    session.add(conversation)
+                    await session.flush()
+                    conversation_id = conversation.id
+                
                 # Save user message
                 user_msg = ChatMessage(
+                    conversation_id=conversation_id,
+                    parent_message_id=request.parent_message_id,
                     is_user=True,
                     content=request.message,
                     created_at=request_time
@@ -700,6 +754,7 @@ if WEB_MODE:
                 
                 # Save assistant message
                 assistant_msg = ChatMessage(
+                    conversation_id=conversation_id,
                     is_user=False,
                     content=response.content,
                     input_tokens=input_tokens,
@@ -737,7 +792,8 @@ if WEB_MODE:
             output_tokens=output_tokens,
             total_tokens=total_tokens,
             cost=format_cost(cost),
-            model=response.model
+            model=response.model,
+            conversation_id=conversation_id
         )
     
     @app.get("/chat/history")
@@ -757,6 +813,67 @@ if WEB_MODE:
             
             return [
                 {
+                    "id": msg.id,
+                    "conversation_id": msg.conversation_id,
+                    "parent_message_id": msg.parent_message_id,
+                    "is_user": msg.is_user,
+                    "content": msg.content,
+                    "input_tokens": msg.input_tokens,
+                    "output_tokens": msg.output_tokens,
+                    "total_tokens": msg.total_tokens,
+                    "cost": msg.cost_usd,
+                    "model": msg.model,
+                    "created_at": msg.created_at.isoformat() if msg.created_at else None
+                }
+                for msg in messages
+            ]
+    
+    @app.get("/conversations")
+    async def list_conversations(limit: int = 50):
+        """List all conversations."""
+        from sqlalchemy import select
+        from workassistant.models.conversation import Conversation
+        from workassistant.database import async_session_maker
+        
+        async with async_session_maker() as session:
+            result = await session.execute(
+                select(Conversation)
+                .order_by(Conversation.updated_at.desc())
+                .limit(limit)
+            )
+            conversations = result.scalars().all()
+            
+            return [
+                {
+                    "id": conv.id,
+                    "title": conv.title,
+                    "summary": conv.summary,
+                    "created_at": conv.created_at.isoformat() if conv.created_at else None,
+                    "updated_at": conv.updated_at.isoformat() if conv.updated_at else None
+                }
+                for conv in conversations
+            ]
+    
+    @app.get("/conversations/{conversation_id}/messages")
+    async def get_conversation_messages(conversation_id: int):
+        """Get all messages for a specific conversation."""
+        from sqlalchemy import select
+        from workassistant.models.chat_message import ChatMessage
+        from workassistant.database import async_session_maker
+        
+        async with async_session_maker() as session:
+            result = await session.execute(
+                select(ChatMessage)
+                .where(ChatMessage.conversation_id == conversation_id)
+                .order_by(ChatMessage.created_at.asc())
+            )
+            messages = result.scalars().all()
+            
+            return [
+                {
+                    "id": msg.id,
+                    "conversation_id": msg.conversation_id,
+                    "parent_message_id": msg.parent_message_id,
                     "is_user": msg.is_user,
                     "content": msg.content,
                     "input_tokens": msg.input_tokens,
