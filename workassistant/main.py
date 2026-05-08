@@ -865,17 +865,48 @@ if WEB_MODE:
             ]
     
     @app.get("/conversations")
-    async def list_conversations(limit: int = 50):
-        """List all conversations."""
-        from sqlalchemy import select
+    async def list_conversations(
+        limit: int = 50,
+        search: str = None,
+        start_date: str = None,
+        end_date: str = None
+    ):
+        """List all conversations with optional search and filtering."""
+        from sqlalchemy import select, or_
         from workassistant.models.conversation import Conversation
         from workassistant.database import async_session_maker
+        from datetime import datetime
         
         async with async_session_maker() as session:
+            query = select(Conversation)
+            
+            # Apply search filter
+            if search:
+                search_pattern = f"%{search}%"
+                query = query.where(
+                    or_(
+                        Conversation.title.ilike(search_pattern),
+                        Conversation.summary.ilike(search_pattern)
+                    )
+                )
+            
+            # Apply date range filter
+            if start_date:
+                try:
+                    start_dt = datetime.fromisoformat(start_date)
+                    query = query.where(Conversation.created_at >= start_dt)
+                except ValueError:
+                    pass
+            
+            if end_date:
+                try:
+                    end_dt = datetime.fromisoformat(end_date)
+                    query = query.where(Conversation.created_at <= end_dt)
+                except ValueError:
+                    pass
+            
             result = await session.execute(
-                select(Conversation)
-                .order_by(Conversation.updated_at.desc())
-                .limit(limit)
+                query.order_by(Conversation.updated_at.desc()).limit(limit)
             )
             conversations = result.scalars().all()
             
@@ -891,17 +922,70 @@ if WEB_MODE:
             ]
     
     @app.get("/conversations/{conversation_id}/messages")
-    async def get_conversation_messages(conversation_id: int):
-        """Get all messages for a specific conversation."""
+    async def get_conversation_messages(
+        conversation_id: int,
+        search: str = None,
+        limit: int = 100
+    ):
+        """Get all messages for a specific conversation with optional search."""
         from sqlalchemy import select
         from workassistant.models.chat_message import ChatMessage
         from workassistant.database import async_session_maker
         
         async with async_session_maker() as session:
+            query = select(ChatMessage).where(ChatMessage.conversation_id == conversation_id)
+            
+            # Apply search filter
+            if search:
+                search_pattern = f"%{search}%"
+                query = query.where(ChatMessage.content.ilike(search_pattern))
+            
             result = await session.execute(
-                select(ChatMessage)
-                .where(ChatMessage.conversation_id == conversation_id)
-                .order_by(ChatMessage.created_at.asc())
+                query.order_by(ChatMessage.created_at.asc()).limit(limit)
+            )
+            messages = result.scalars().all()
+            
+            return [
+                {
+                    "id": msg.id,
+                    "conversation_id": msg.conversation_id,
+                    "parent_message_id": msg.parent_message_id,
+                    "is_user": msg.is_user,
+                    "content": msg.content,
+                    "input_tokens": msg.input_tokens,
+                    "output_tokens": msg.output_tokens,
+                    "total_tokens": msg.total_tokens,
+                    "cost": msg.cost_usd,
+                    "model": msg.model,
+                    "created_at": msg.created_at.isoformat() if msg.created_at else None
+                }
+                for msg in messages
+            ]
+    
+    @app.get("/messages/search")
+    async def search_all_messages(
+        search: str,
+        limit: int = 50,
+        conversation_id: int = None
+    ):
+        """Search messages across all conversations or a specific conversation."""
+        from sqlalchemy import select
+        from workassistant.models.chat_message import ChatMessage
+        from workassistant.database import async_session_maker
+        
+        async with async_session_maker() as session:
+            query = select(ChatMessage)
+            
+            # Apply search filter
+            search_pattern = f"%{search}%"
+            query = query.where(ChatMessage.content.ilike(search_pattern))
+            
+            # Filter by conversation if specified
+            if conversation_id:
+                query = query.where(ChatMessage.conversation_id == conversation_id)
+            
+            result = await session.execute(
+                query.order_by(ChatMessage.created_at.desc()).limit(limit)
             )
             messages = result.scalars().all()
             
