@@ -8,74 +8,74 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from workassistant.models.project import Project
 from workassistant.models.project_location import ProjectLocation
 from workassistant.database import async_session_maker
+from workassistant.jobs.scan_job_manager import scan_job_manager
 
-async def scan_projects(location_path: str) -> Dict[str, any]:
+
+async def scan_projects(location_path: str, incremental: bool = True) -> Dict[str, any]:
     """
-    Scan a location for projects (git repos and plain folders).
-    Detects .git folders for git repos, extracts metadata.
-    
+    Start a background scan of a location for projects (git repos and plain folders).
+    The scan runs asynchronously. Returns a job_id to track progress.
+
     Args:
         location_path: Path to scan for projects
-        
+        incremental: Only process projects/commits that changed since last scan
+
     Returns:
-        Dictionary with scan results including number of projects found
+        Dictionary with job_id and status — use check_scan_status(job_id) to poll progress
     """
     location_path = Path(location_path).expanduser().resolve()
-    
+
     if not location_path.exists():
         return {"error": f"Location does not exist: {location_path}"}
-    
-    projects_found = []
-    
+
+    # Ensure the ProjectLocation record exists
     async with async_session_maker() as session:
-        location = await session.execute(
+        result = await session.execute(
             select(ProjectLocation).where(ProjectLocation.path == str(location_path))
         )
-        location_record = location.scalar_one_or_none()
-        
+        location_record = result.scalar_one_or_none()
+
         if not location_record:
             location_record = ProjectLocation(
                 path=str(location_path),
                 is_primary=False,
-                is_active=True
+                is_active=True,
             )
             session.add(location_record)
             await session.commit()
             await session.refresh(location_record)
-        
-        for item in location_path.iterdir():
-            if not item.is_dir():
-                continue
-                
-            if item.name.startswith('.'):
-                continue
-            
-            project_data = await _extract_project_metadata(item, location_record.id)
-            
-            if project_data:
-                existing = await session.execute(
-                    select(Project).where(Project.path == str(item))
-                )
-                existing_project = existing.scalar_one_or_none()
-                
-                if existing_project:
-                    for key, value in project_data.items():
-                        setattr(existing_project, key, value)
-                    existing_project.last_scanned_at = datetime.utcnow()
-                else:
-                    project = Project(**project_data, last_scanned_at=datetime.utcnow())
-                    session.add(project)
-                
-                projects_found.append(project_data['name'])
-        
-        await session.commit()
-    
+
+        location_id = location_record.id
+
+    job_id = await scan_job_manager.start_scan(
+        location_id=location_id,
+        incremental=incremental,
+    )
+
     return {
         "success": True,
+        "job_id": job_id,
+        "status": "started",
         "location": str(location_path),
-        "projects_found": len(projects_found),
-        "projects": projects_found
+        "message": (
+            f"Scan started in background. "
+            f"job_id: {job_id}. "
+            f"Use check_scan_status('{job_id}') to monitor progress."
+        ),
     }
+
+
+async def check_scan_status(job_id: str) -> Dict[str, any]:
+    """
+    Check the status and progress of a background scan job.
+
+    Args:
+        job_id: The job ID returned by scan_projects
+
+    Returns:
+        Dictionary with current status, phase, progress percentage, and metrics
+    """
+    return await scan_job_manager.get_status(job_id)
 
 async def _extract_project_metadata(project_path: Path, location_id: int) -> Optional[Dict]:
     """Extract metadata from a project directory."""

@@ -1,5 +1,6 @@
 from sqlalchemy import Column, Integer, String, Boolean, DateTime, Text, ForeignKey
 from sqlalchemy.sql import func
+from sqlalchemy.orm import relationship
 from workassistant.models.base import Base
 
 class Project(Base):
@@ -20,3 +21,13 @@ class Project(Base):
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)
     last_scanned_at = Column(DateTime(timezone=True), nullable=True)
+    
+    # Enhanced scanning columns
+    commit_count = Column(Integer, nullable=True)
+    last_analyzed_commit_hash = Column(String, nullable=True)
+    last_analyzed_commit_date = Column(DateTime(timezone=True), nullable=True)
+    scan_status = Column(String, nullable=True)
+    scan_phase = Column(String, nullable=True)
+    
+    # Relationships
+    commit_summaries = relationship("CommitSummary", back_populates="project")

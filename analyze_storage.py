@@ -219,6 +219,8 @@ class ProgressTracker:
         self.last_update = 0
         self.stop_event = Event()
         self.current_repo_name = None
+        self.current_repo_commits = 0  # Commits processed in current repo
+        self.current_repo_total = 0    # Total commits in current repo
         
     def increment_analyzed(self, commit_count: int = 0):
         """Increment analyzed repo count and optionally commit count."""
@@ -229,13 +231,21 @@ class ProgressTracker:
         """Update analyzed commits count."""
         self.analyzed_commits = commit_count
     
-    def set_current_repo(self, repo_name: str):
+    def set_current_repo(self, repo_name: str, total_commits: int = 0):
         """Set the name of the currently analyzing repo."""
         self.current_repo_name = repo_name
+        self.current_repo_commits = 0
+        self.current_repo_total = total_commits
+    
+    def update_current_repo_commits(self, commits: int):
+        """Update commits processed in current repo."""
+        self.current_repo_commits = commits
     
     def clear_current_repo(self):
         """Clear current repo name."""
         self.current_repo_name = None
+        self.current_repo_commits = 0
+        self.current_repo_total = 0
         
     def start_updater(self):
         """Start background thread for periodic updates."""
@@ -288,9 +298,12 @@ class ProgressTracker:
         if rate > 0:
             progress_str += f" | Rate: {rate:.0f} commits/s"
         
-        # Add current repo name
+        # Add current repo name and per-repo progress
         if self.current_repo_name:
             progress_str += f" | Current: {self.current_repo_name}"
+            if self.current_repo_total > 0:
+                repo_commit_progress = (self.current_repo_commits / self.current_repo_total) * 100
+                progress_str += f" ({self.current_repo_commits}/{self.current_repo_total} = {repo_commit_progress:.0f}%)"
         
         progress_str += f" | Elapsed: {elapsed:.1f}s"
         
@@ -965,12 +978,13 @@ def main():
             
             # Set current repo in checkpoint and progress tracker
             checkpoint.set_current_repo(item_path, resume_from, partial_stats)
-            progress.set_current_repo(repo_path.name)
+            progress.set_current_repo(repo_path.name, repo_commit_count)
             
             # Progress callback to update commits during analysis
             def progress_callback(commits_processed):
                 current_total = analyzed_so_far + commits_processed
                 progress.update_commits(current_total)
+                progress.update_current_repo_commits(commits_processed)
             
             stats = analyze_git_repo(repo_path, progress_callback=progress_callback, checkpoint=checkpoint, resume_from_commit=resume_from, partial_stats=partial_stats, last_analyzed_date=last_analyzed_date)
             git_repos.append(stats)

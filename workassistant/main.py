@@ -1,13 +1,31 @@
 import asyncio
 import sys
 from agno.agent import Agent
-from workassistant.config import AGENT_NAME, AGENT_MODEL
+from workassistant.config import AGENT_NAME, AGENT_MODEL, LOG_DIR, LOG_LEVEL
+from workassistant.logging_config import setup_logging
+
+# Setup logging immediately
+setup_logging(log_dir=LOG_DIR, log_level=LOG_LEVEL)
 from workassistant.tools.project_tools import (
     scan_projects,
+    check_scan_status,
     list_projects,
     add_project_location,
     git_log,
     git_diff_summary
+)
+from workassistant.tools.cost_tools import (
+    get_scan_cost_summary,
+    get_api_cost_history,
+    get_project_cost_breakdown
+)
+from workassistant.tools.graph_tools import (
+    build_project_graph,
+    get_project_graph_report
+)
+from workassistant.tools.log_tools import (
+    get_logs,
+    get_available_log_files
 )
 from workassistant.tools.journal_tools import (
     add_journal_entry,
@@ -25,6 +43,8 @@ if WEB_MODE:
     from fastapi.staticfiles import StaticFiles
     from pydantic import BaseModel
     import uvicorn
+    from workassistant.api.scan_routes import router as scan_router
+    from workassistant.api.graph_routes import router as graph_router
 
 # OpenAI pricing (as of 2024)
 PRICING = {
@@ -80,12 +100,20 @@ AGENT_INSTRUCTIONS = """You are a Personal Work Assistant that helps track proje
 
 ## Tool Usage
 
-- Use `scan_projects` to discover new projects in configured locations
+- Use `scan_projects` to start a background scan of a location — returns a job_id immediately
+- Use `check_scan_status` with a job_id to monitor scan progress
 - Use `list_projects` to see what projects are tracked
 - Use `git_log` and `git_diff_summary` for Git repository details (only for git repos)
 - Use `add_journal_entry` to create journal entries
 - Use `search_journal` to find past work
 - Use `add_project_location` to add new project root directories
+- Use `get_scan_cost_summary` to see AI API costs for recent scans
+- Use `get_api_cost_history` for time-series cost trends
+- Use `get_project_cost_breakdown` for per-project AI cost breakdown
+- Use `build_project_graph` to generate an interactive knowledge graph for a project (powered by Graphify)
+- Use `get_project_graph_report` to get the graph report including god nodes, communities, and architecture insights
+- Use `get_logs` to view recent log entries from files (workassistant.log, errors.log, scan_jobs.log)
+- Use `get_available_log_files` to list all available log files
 
 Always be helpful, context-aware, and focused on making work tracking effortless.
 """
@@ -106,6 +134,7 @@ def get_agent():
             add_history_to_context=False,
             tools=[
                 scan_projects,
+                check_scan_status,
                 list_projects,
                 add_project_location,
                 git_log,
@@ -114,6 +143,13 @@ def get_agent():
                 search_journal,
                 get_recent_journal_entries,
                 get_journal_summary,
+                get_scan_cost_summary,
+                get_api_cost_history,
+                get_project_cost_breakdown,
+                build_project_graph,
+                get_project_graph_report,
+                get_logs,
+                get_available_log_files,
             ],
             markdown=True,
         )
@@ -121,6 +157,8 @@ def get_agent():
 
 if WEB_MODE:
     app = FastAPI(title="Work Assistant", version="0.1.0")
+    app.include_router(scan_router)
+    app.include_router(graph_router)
     
     class ChatRequest(BaseModel):
         message: str
@@ -309,6 +347,40 @@ if WEB_MODE:
             background: #e0e0e0;
         }
         
+        .scan-panel {
+            display: none;
+            margin: 10px 20px;
+            padding: 14px 16px;
+            background: #f0f4ff;
+            border: 1px solid #c7d4ff;
+            border-radius: 10px;
+            font-size: 13px;
+        }
+        .scan-panel.active { display: block; }
+        .scan-panel h4 { margin: 0 0 8px; color: #4a5568; font-size: 13px; }
+        .progress-bar-track {
+            background: #dde3f3;
+            border-radius: 6px;
+            height: 8px;
+            margin-bottom: 8px;
+            overflow: hidden;
+        }
+        .progress-bar-fill {
+            background: linear-gradient(90deg, #667eea, #764ba2);
+            height: 100%;
+            border-radius: 6px;
+            transition: width 0.4s ease;
+            width: 0%;
+        }
+        .scan-metrics { display: flex; gap: 14px; flex-wrap: wrap; color: #555; margin-bottom: 6px; }
+        .scan-metrics span { font-size: 12px; }
+        .scan-status-text { font-size: 12px; color: #555; margin-bottom: 6px; }
+        .scan-cancel-btn {
+            background: #e53e3e; color: white; border: none; border-radius: 6px;
+            padding: 4px 12px; font-size: 12px; cursor: pointer;
+        }
+        .scan-cancel-btn:hover { background: #c53030; }
+
         .loading {
             display: none;
             text-align: center;
@@ -376,11 +448,24 @@ if WEB_MODE:
         </div>
         
         <div class="input-container">
+            <div id="scan-panel" class="scan-panel">
+                <h4>🔍 Scan in Progress</h4>
+                <div class="progress-bar-track"><div id="scan-progress-fill" class="progress-bar-fill"></div></div>
+                <div id="scan-status-text" class="scan-status-text">Initializing...</div>
+                <div class="scan-metrics">
+                    <span>Projects: <b id="scan-projects">0/0</b></span>
+                    <span>Commits: <b id="scan-commits">0</b></span>
+                    <span>Phase: <b id="scan-phase">discovery</b></span>
+                    <span>Cost: <b id="scan-cost">$0.000000</b></span>
+                </div>
+                <button class="scan-cancel-btn" onclick="cancelActiveScan()">Cancel Scan</button>
+            </div>
             <div class="suggestions">
                 <button class="suggestion" onclick="sendSuggestion('List my projects')">📁 List my projects</button>
                 <button class="suggestion" onclick="sendSuggestion('Add journal entry: I worked on authentication')">📝 Add journal entry</button>
                 <button class="suggestion" onclick="sendSuggestion('Search journal for API')">🔍 Search journal</button>
                 <button class="suggestion" onclick="sendSuggestion('What did I work on yesterday?')">🤔 What did I work on?</button>
+                <button class="suggestion" onclick="sendSuggestion('Build a knowledge graph for my project')">🕸️ Knowledge Graph</button>
             </div>
             <div class="input-wrapper">
                 <input type="text" id="user-input" placeholder="Type your message..." onkeypress="handleKeyPress(event)">
@@ -444,6 +529,16 @@ if WEB_MODE:
                     total_tokens: data.total_tokens,
                     cost: data.cost
                 });
+                
+                // Check for job_id in response to auto-start scan monitor
+                if (typeof data.response === 'string') {
+                    const m = data.response.match(/job_id["\\s:]+([0-9a-f-]{36})/i);
+                    if (m) {
+                        if (activeScanMonitor) activeScanMonitor.stop();
+                        activeScanMonitor = new ScanProgressMonitor(m[1]);
+                        activeScanMonitor.start();
+                    }
+                }
             } catch (error) {
                 loading.classList.remove('active');
                 addMessage('Sorry, something went wrong. Please try again.', false);
@@ -463,6 +558,106 @@ if WEB_MODE:
                 sendMessage();
             }
         }
+        
+        async function loadChatHistory() {
+            try {
+                const response = await fetch('/chat/history?limit=100');
+                const messages = await response.json();
+                messages.forEach(msg => {
+                    const metrics = msg.is_user ? null : {
+                        input_tokens: msg.input_tokens,
+                        output_tokens: msg.output_tokens,
+                        total_tokens: msg.total_tokens,
+                        cost: msg.cost
+                    };
+                    addMessage(msg.content, msg.is_user, metrics);
+                });
+            } catch (error) {
+                console.error('Failed to load chat history:', error);
+            }
+        }
+        
+        // Load chat history on page load
+        loadChatHistory();
+        
+        userInput.addEventListener('keypress', handleKeyPress);
+        sendButton.addEventListener('click', sendMessage);
+
+        // ---- Scan Progress Monitor ----
+        let activeScanMonitor = null;
+
+        class ScanProgressMonitor {
+            constructor(jobId) {
+                this.jobId = jobId;
+                this.ws = null;
+                this.pollTimer = null;
+                this.done = false;
+            }
+
+            start() {
+                this._showPanel();
+                this._connectWS();
+                this.pollTimer = setInterval(() => this._poll(), 3000);
+            }
+
+            _connectWS() {
+                const proto = location.protocol === 'https:' ? 'wss' : 'ws';
+                this.ws = new WebSocket(`${proto}://${location.host}/api/scan/ws/${this.jobId}`);
+                this.ws.onmessage = (e) => { try { this._update(JSON.parse(e.data)); } catch(_) {} };
+                this.ws.onerror = () => { /* fallback to polling */ };
+            }
+
+            async _poll() {
+                if (this.done) return;
+                try {
+                    const r = await fetch(`/api/scan/status/${this.jobId}`);
+                    const d = await r.json();
+                    this._update(d);
+                } catch(_) {}
+            }
+
+            _update(d) {
+                if (!d || d.error) return;
+                const pct = d.progress_percent || 0;
+                document.getElementById('scan-progress-fill').style.width = pct + '%';
+                document.getElementById('scan-phase').textContent = d.phase || '';
+                document.getElementById('scan-projects').textContent =
+                    `${d.projects_processed||0}/${d.projects_total||'?'}`;
+                document.getElementById('scan-commits').textContent = d.commits_processed || 0;
+                const cost = d.ai_cost_usd !== undefined ? `$${Number(d.ai_cost_usd).toFixed(6)}` : '$0.000000';
+                document.getElementById('scan-cost').textContent = cost;
+                const cur = d.current_project ? ` — ${d.current_project}` : '';
+                document.getElementById('scan-status-text').textContent =
+                    `${d.phase || 'scanning'}${cur}  (${pct}%)`;
+                if (d.status === 'completed') { this._finish('Scan completed!'); }
+                if (d.status === 'failed')    { this._finish('Scan failed: ' + (d.error_message || '')); }
+                if (d.status === 'cancelled') { this._finish('Scan cancelled.'); }
+            }
+
+            _finish(msg) {
+                this.done = true;
+                this.stop();
+                document.getElementById('scan-status-text').textContent = msg;
+                setTimeout(() => this._hidePanel(), 5000);
+            }
+
+            stop() {
+                if (this.ws) { try { this.ws.close(); } catch(_) {} }
+                if (this.pollTimer) { clearInterval(this.pollTimer); }
+            }
+
+            async cancel() {
+                await fetch(`/api/scan/cancel/${this.jobId}`, { method: 'POST' });
+                this._finish('Cancelling...');
+            }
+
+            _showPanel() { document.getElementById('scan-panel').classList.add('active'); }
+            _hidePanel() { document.getElementById('scan-panel').classList.remove('active'); }
+        }
+
+        function cancelActiveScan() {
+            if (activeScanMonitor) activeScanMonitor.cancel();
+        }
     </script>
 </body>
 </html>
@@ -474,8 +669,15 @@ if WEB_MODE:
     
     @app.post("/chat", response_model=ChatResponse)
     async def chat(request: ChatRequest):
+        from datetime import datetime, timezone
+        from workassistant.models.ai_api_call import AIApiCall
+        from workassistant.models.chat_message import ChatMessage
+        from workassistant.database import async_session_maker
+        
+        request_time = datetime.now(timezone.utc)
         agent_instance = get_agent()
         response = await agent_instance.arun(request.message)
+        response_time = datetime.now(timezone.utc)
         
         # Extract metrics
         input_tokens = getattr(response.metrics, 'input_tokens', 0) if response.metrics else 0
@@ -483,6 +685,51 @@ if WEB_MODE:
         total_tokens = getattr(response.metrics, 'total_tokens', 0) if response.metrics else 0
         
         cost = calculate_cost(response.model, input_tokens, output_tokens)
+        duration_ms = int((response_time - request_time).total_seconds() * 1000)
+        
+        # Log API call to database
+        try:
+            async with async_session_maker() as session:
+                # Save user message
+                user_msg = ChatMessage(
+                    is_user=True,
+                    content=request.message,
+                    created_at=request_time
+                )
+                session.add(user_msg)
+                
+                # Save assistant message
+                assistant_msg = ChatMessage(
+                    is_user=False,
+                    content=response.content,
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    total_tokens=total_tokens,
+                    cost_usd=format_cost(cost),
+                    model=response.model,
+                    created_at=response_time
+                )
+                session.add(assistant_msg)
+                
+                # Save API call
+                api_call = AIApiCall(
+                    model=response.model,
+                    operation="chat_message",
+                    input_tokens=input_tokens,
+                    output_tokens=output_tokens,
+                    total_tokens=total_tokens,
+                    cost_usd=cost,
+                    request_timestamp=request_time,
+                    response_timestamp=response_time,
+                    duration_ms=duration_ms,
+                    success=True,
+                    error_message=None
+                )
+                session.add(api_call)
+                await session.commit()
+        except Exception as e:
+            import logging
+            logging.error(f"Failed to log chat message/API call: {e}")
         
         return ChatResponse(
             response=response.content,
@@ -492,6 +739,35 @@ if WEB_MODE:
             cost=format_cost(cost),
             model=response.model
         )
+    
+    @app.get("/chat/history")
+    async def get_chat_history(limit: int = 50):
+        """Get recent chat history."""
+        from sqlalchemy import select
+        from workassistant.models.chat_message import ChatMessage
+        from workassistant.database import async_session_maker
+        
+        async with async_session_maker() as session:
+            result = await session.execute(
+                select(ChatMessage)
+                .order_by(ChatMessage.created_at.asc())
+                .limit(limit)
+            )
+            messages = result.scalars().all()
+            
+            return [
+                {
+                    "is_user": msg.is_user,
+                    "content": msg.content,
+                    "input_tokens": msg.input_tokens,
+                    "output_tokens": msg.output_tokens,
+                    "total_tokens": msg.total_tokens,
+                    "cost": msg.cost_usd,
+                    "model": msg.model,
+                    "created_at": msg.created_at.isoformat() if msg.created_at else None
+                }
+                for msg in messages
+            ]
     
     async def run_web():
         """Run the web server."""

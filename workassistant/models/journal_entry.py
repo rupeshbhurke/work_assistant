@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, ARRAY
+from sqlalchemy import Column, Integer, String, DateTime, Text, ForeignKey, Boolean, ARRAY
 from sqlalchemy.sql import func
 from workassistant.models.base import Base
 
@@ -14,5 +14,7 @@ class JournalEntry(Base):
     tags = Column(ARRAY(String), nullable=True)
     blockers = Column(Text, nullable=True)
     entry_type = Column(String, default="free-form", nullable=False)
+    commit_summary_ids = Column(ARRAY(Integer), nullable=True)
+    auto_generated = Column(Boolean, nullable=False, server_default='false')
     created_at = Column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False)

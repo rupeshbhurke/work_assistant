@@ -10,6 +10,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from workassistant.config import DATABASE_URL
 from workassistant.models.base import Base
+# Import all models to register their tables in Base.metadata
+import workassistant.models  # noqa: F401
 
 config = context.config
 
