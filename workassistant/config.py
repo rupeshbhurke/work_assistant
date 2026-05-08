@@ -63,3 +63,6 @@ AI_PRICING = {
     "gpt-4": {"input": 0.03, "output": 0.06},
     "gpt-3.5-turbo": {"input": 0.0005, "output": 0.0015},
 }
+
+# --- Chat context configuration ---
+CHAT_CONTEXT_WINDOW_SIZE = int(os.getenv("CHAT_CONTEXT_WINDOW_SIZE", "10"))

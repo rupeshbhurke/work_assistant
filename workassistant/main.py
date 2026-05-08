@@ -1,7 +1,7 @@
 import asyncio
 import sys
 from agno.agent import Agent
-from workassistant.config import AGENT_NAME, AGENT_MODEL, LOG_DIR, LOG_LEVEL
+from workassistant.config import AGENT_NAME, AGENT_MODEL, LOG_DIR, LOG_LEVEL, CHAT_CONTEXT_WINDOW_SIZE
 from workassistant.logging_config import setup_logging
 
 # Setup logging immediately
@@ -91,6 +91,30 @@ def generate_conversation_title(message: str) -> str:
         message = message[:-1]
     
     return message or "New Conversation"
+
+async def load_conversation_context(conversation_id: int, session):
+    """Load recent conversation history for context."""
+    from sqlalchemy import select
+    from workassistant.models.chat_message import ChatMessage
+    
+    result = await session.execute(
+        select(ChatMessage)
+        .where(ChatMessage.conversation_id == conversation_id)
+        .order_by(ChatMessage.created_at.desc())
+        .limit(CHAT_CONTEXT_WINDOW_SIZE)
+    )
+    messages = result.scalars().all()
+    
+    # Reverse to get chronological order
+    messages = list(reversed(messages))
+    
+    # Format as conversation history
+    context_parts = []
+    for msg in messages:
+        role = "User" if msg.is_user else "Assistant"
+        context_parts.append(f"{role}: {msg.content}")
+    
+    return "\n\n".join(context_parts)
 
 AGENT_INSTRUCTIONS = """You are a Personal Work Assistant that helps track projects, maintain work journals, and answer questions about work history.
 
@@ -703,8 +727,20 @@ if WEB_MODE:
         from sqlalchemy import select
         
         request_time = datetime.now(timezone.utc)
+        
+        # Load conversation context if conversation_id is provided
+        conversation_context = ""
+        if request.conversation_id:
+            async with async_session_maker() as session:
+                conversation_context = await load_conversation_context(request.conversation_id, session)
+        
+        # Prepend context to message if available
+        message_to_send = request.message
+        if conversation_context:
+            message_to_send = f"Previous conversation context:\n\n{conversation_context}\n\n---\n\nCurrent message: {request.message}"
+        
         agent_instance = get_agent()
-        response = await agent_instance.arun(request.message)
+        response = await agent_instance.arun(message_to_send)
         response_time = datetime.now(timezone.utc)
         
         # Extract metrics
