@@ -303,14 +303,187 @@ if WEB_MODE:
         
         .container {
             width: 100%;
-            max-width: 900px;
+            max-width: 1200px;
             background: white;
             border-radius: 16px;
             box-shadow: 0 20px 60px rgba(0, 0, 0, 0.3);
             overflow: hidden;
             display: flex;
-            flex-direction: column;
+            flex-direction: row;
             height: 90vh;
+        }
+        
+        .main-content {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            min-width: 0;
+        }
+        
+        .sidebar {
+            width: 320px;
+            background: #f8f9fa;
+            border-left: 1px solid #e9ecef;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            transition: transform 0.3s ease;
+        }
+        
+        .sidebar.collapsed {
+            width: 0;
+            transform: translateX(100%);
+        }
+        
+        .sidebar-header {
+            padding: 20px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+        }
+        
+        .sidebar-header h3 {
+            font-size: 18px;
+            margin: 0;
+        }
+        
+        .sidebar-close {
+            background: none;
+            border: none;
+            color: white;
+            font-size: 24px;
+            cursor: pointer;
+            padding: 0;
+            width: 30px;
+            height: 30px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .sidebar-search {
+            padding: 15px;
+            border-bottom: 1px solid #e9ecef;
+        }
+        
+        .sidebar-search input {
+            width: 100%;
+            padding: 10px 15px;
+            border: 2px solid #e9ecef;
+            border-radius: 8px;
+            font-size: 14px;
+            outline: none;
+            transition: border-color 0.3s;
+        }
+        
+        .sidebar-search input:focus {
+            border-color: #667eea;
+        }
+        
+        .sidebar-content {
+            flex: 1;
+            overflow-y: auto;
+            padding: 15px;
+        }
+        
+        .feature-category {
+            margin-bottom: 20px;
+        }
+        
+        .feature-category-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #495057;
+            margin-bottom: 10px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .feature-card {
+            background: white;
+            border: 1px solid #e9ecef;
+            border-radius: 8px;
+            padding: 12px;
+            margin-bottom: 8px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        
+        .feature-card:hover {
+            border-color: #667eea;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
+            transform: translateY(-1px);
+        }
+        
+        .feature-card-title {
+            font-size: 14px;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 4px;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .feature-card-description {
+            font-size: 12px;
+            color: #666;
+            margin-bottom: 8px;
+        }
+        
+        .feature-card-example {
+            font-size: 11px;
+            color: #667eea;
+            background: #f0f3ff;
+            padding: 6px 8px;
+            border-radius: 4px;
+            font-style: italic;
+        }
+        
+        .feature-badge {
+            font-size: 10px;
+            padding: 2px 6px;
+            border-radius: 4px;
+            font-weight: 600;
+        }
+        
+        .badge-instant {
+            background: #d4edda;
+            color: #155724;
+        }
+        
+        .badge-lightweight {
+            background: #fff3cd;
+            color: #856404;
+        }
+        
+        .badge-deep {
+            background: #f8d7da;
+            color: #721c24;
+        }
+        
+        .toggle-sidebar {
+            position: fixed;
+            right: 20px;
+            top: 50%;
+            transform: translateY(-50%);
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 12px 16px;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            z-index: 1000;
+            font-size: 16px;
+            transition: all 0.3s;
+        }
+        
+        .toggle-sidebar:hover {
+            transform: translateY(-50%) scale(1.05);
         }
         
         .header {
@@ -542,13 +715,16 @@ if WEB_MODE:
     </style>
 </head>
 <body>
+    <button class="toggle-sidebar" onclick="toggleSidebar()">📚 Features</button>
+    
     <div class="container">
-        <div class="header">
-            <h1>🤖 Work Assistant</h1>
-            <p>Your personal project and journal assistant</p>
-        </div>
-        
-        <div class="chat-container" id="chat-container">
+        <div class="main-content">
+            <div class="header">
+                <h1>🤖 Work Assistant</h1>
+                <p>Your personal project and journal assistant</p>
+            </div>
+            
+            <div class="chat-container" id="chat-container">
             <div class="message assistant">
                 <div class="message-content">
                     Hello! I'm your Work Assistant. I can help you:
@@ -591,6 +767,20 @@ if WEB_MODE:
             <div class="input-wrapper">
                 <input type="text" id="user-input" placeholder="Type your message..." onkeypress="handleKeyPress(event)">
                 <button id="send-button" onclick="sendMessage()">Send</button>
+            </div>
+        </div>
+        </div>
+        
+        <div class="sidebar" id="sidebar">
+            <div class="sidebar-header">
+                <h3>📚 Features</h3>
+                <button class="sidebar-close" onclick="toggleSidebar()">×</button>
+            </div>
+            <div class="sidebar-search">
+                <input type="text" id="feature-search" placeholder="Search features..." oninput="filterFeatures()">
+            </div>
+            <div class="sidebar-content" id="feature-content">
+                <!-- Features will be populated by JavaScript -->
             </div>
         </div>
     </div>
@@ -720,6 +910,254 @@ if WEB_MODE:
         
         userInput.addEventListener('keypress', handleKeyPress);
         sendButton.addEventListener('click', sendMessage);
+        
+        // ---- Feature Discovery System ----
+        const features = [
+            {
+                category: "⚡ Instant Queries (Tier 1)",
+                tier: "instant",
+                features: [
+                    {
+                        title: "Count Repos",
+                        description: "Count git repositories at a location",
+                        example: "How many repos at /path/to/projects?",
+                        icon: "🔢"
+                    },
+                    {
+                        title: "List Repos Fast",
+                        description: "Quick repo listing without git metadata",
+                        example: "List all repos in my work directory",
+                        icon: "📋"
+                    },
+                    {
+                        title: "Check if Repo",
+                        description: "Instant git repository detection",
+                        example: "Is /path/to/project a git repository?",
+                        icon: "✅"
+                    },
+                    {
+                        title: "Cached Stats",
+                        description: "Get cached project statistics",
+                        example: "Show me project statistics from database",
+                        icon: "📊"
+                    },
+                    {
+                        title: "Search Projects",
+                        description: "Search projects by name pattern",
+                        example: "Find projects named 'auth'",
+                        icon: "🔍"
+                    },
+                    {
+                        title: "Project Locations",
+                        description: "List configured project locations",
+                        example: "Show me all configured project locations",
+                        icon: "📍"
+                    }
+                ]
+            },
+            {
+                category: "🔍 Lightweight Queries (Tier 2)",
+                tier: "lightweight",
+                features: [
+                    {
+                        title: "Repo Basic Info",
+                        description: "Get basic git metadata",
+                        example: "What's the last commit in repo X?",
+                        icon: "ℹ️"
+                    },
+                    {
+                        title: "Commit Count",
+                        description: "Count commits without analyzing",
+                        example: "How many commits in the authentication service?",
+                        icon: "📈"
+                    },
+                    {
+                        title: "Recent Activity",
+                        description: "Find recently active repositories",
+                        example: "Which repos had activity this week?",
+                        icon: "🕐"
+                    },
+                    {
+                        title: "Detect Language",
+                        description: "Detect project programming language",
+                        example: "What language is this project written in?",
+                        icon: "💻"
+                    },
+                    {
+                        title: "Compare Sizes",
+                        description: "Compare repos by commit count",
+                        example: "Compare my projects by size",
+                        icon: "⚖️"
+                    }
+                ]
+            },
+            {
+                category: "🔬 Deep Scans (Tier 3)",
+                tier: "deep",
+                features: [
+                    {
+                        title: "Full Scan",
+                        description: "Complete project scan with AI analysis",
+                        example: "Scan my entire workspace with AI analysis",
+                        icon: "🔬"
+                    },
+                    {
+                        title: "Knowledge Graph",
+                        description: "Build interactive knowledge graph",
+                        example: "Build a knowledge graph for my project",
+                        icon: "🕸️"
+                    }
+                ]
+            },
+            {
+                category: "📝 Journal Management",
+                tier: "lightweight",
+                features: [
+                    {
+                        title: "Add Entry",
+                        description: "Create structured journal entry",
+                        example: "Add journal entry: I worked on authentication",
+                        icon: "➕"
+                    },
+                    {
+                        title: "Search Journal",
+                        description: "Search through journal entries",
+                        example: "Search journal for API",
+                        icon: "🔍"
+                    },
+                    {
+                        title: "Recent Entries",
+                        description: "Get recent journal entries",
+                        example: "Show me recent journal entries",
+                        icon: "📑"
+                    },
+                    {
+                        title: "Work Summary",
+                        description: "Generate work period summaries",
+                        example: "What did I work on this week?",
+                        icon: "📊"
+                    }
+                ]
+            },
+            {
+                category: "💰 Cost Tracking",
+                tier: "lightweight",
+                features: [
+                    {
+                        title: "Scan Cost Summary",
+                        description: "Recent scan cost summary",
+                        example: "Show me recent scan costs",
+                        icon: "💵"
+                    },
+                    {
+                        title: "Cost History",
+                        description: "Time-series cost trends",
+                        example: "Show cost trends over time",
+                        icon: "📈"
+                    },
+                    {
+                        title: "Project Costs",
+                        description: "Per-project cost breakdown",
+                        example: "Break down costs by project",
+                        icon: "📊"
+                    }
+                ]
+            },
+            {
+                category: "📊 Git Operations",
+                tier: "lightweight",
+                features: [
+                    {
+                        title: "Git Log",
+                        description: "Get detailed commit history",
+                        example: "Show me recent commits for project X",
+                        icon: "📜"
+                    },
+                    {
+                        title: "Git Diff",
+                        description: "Analyze commit differences",
+                        example: "Show diff for commit abc123",
+                        icon: "🔀"
+                    }
+                ]
+            }
+        ];
+        
+        function renderFeatures(featureList = features) {
+            const content = document.getElementById('feature-content');
+            content.innerHTML = '';
+            
+            featureList.forEach(category => {
+                const categoryDiv = document.createElement('div');
+                categoryDiv.className = 'feature-category';
+                categoryDiv.innerHTML = `
+                    <div class="feature-category-title">${category.category}</div>
+                `;
+                
+                category.features.forEach(feature => {
+                    const card = document.createElement('div');
+                    card.className = 'feature-card';
+                    card.innerHTML = `
+                        <div class="feature-card-title">
+                            <span>${feature.icon}</span>
+                            ${feature.title}
+                            <span class="feature-badge badge-${feature.tier}">${feature.tier}</span>
+                        </div>
+                        <div class="feature-card-description">${feature.description}</div>
+                        <div class="feature-card-example">"${feature.example}"</div>
+                    `;
+                    card.onclick = () => {
+                        sendSuggestion(feature.example);
+                    };
+                    categoryDiv.appendChild(card);
+                });
+                
+                content.appendChild(categoryDiv);
+            });
+        }
+        
+        function toggleSidebar() {
+            const sidebar = document.getElementById('sidebar');
+            const toggleBtn = document.querySelector('.toggle-sidebar');
+            sidebar.classList.toggle('collapsed');
+            
+            if (sidebar.classList.contains('collapsed')) {
+                toggleBtn.textContent = '📚 Features';
+            } else {
+                toggleBtn.textContent = '✕';
+            }
+        }
+        
+        function filterFeatures() {
+            const searchTerm = document.getElementById('feature-search').value.toLowerCase();
+            
+            if (!searchTerm) {
+                renderFeatures(features);
+                return;
+            }
+            
+            const filtered = features.map(category => ({
+                ...category,
+                features: category.features.filter(feature => 
+                    feature.title.toLowerCase().includes(searchTerm) ||
+                    feature.description.toLowerCase().includes(searchTerm) ||
+                    feature.example.toLowerCase().includes(searchTerm)
+                )
+            })).filter(category => category.features.length > 0);
+            
+            renderFeatures(filtered);
+        }
+        
+        // Initialize features on page load
+        renderFeatures();
+        
+        // Auto-open sidebar on first visit
+        if (!localStorage.getItem('sidebarVisited')) {
+            setTimeout(() => {
+                toggleSidebar();
+                localStorage.setItem('sidebarVisited', 'true');
+            }, 1000);
+        }
 
         // ---- Scan Progress Monitor ----
         let activeScanMonitor = null;
