@@ -299,6 +299,11 @@ if WEB_MODE:
             justify-content: center;
             align-items: center;
             padding: 20px;
+            transition: background 0.3s ease;
+        }
+        
+        body.dark-mode {
+            background: linear-gradient(135deg, #1a1a2e 0%, #16213e 100%);
         }
         
         .container {
@@ -311,6 +316,12 @@ if WEB_MODE:
             display: flex;
             flex-direction: row;
             height: 90vh;
+            transition: background 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        body.dark-mode .container {
+            background: #1e1e2e;
+            box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
         }
         
         .main-content {
@@ -327,7 +338,12 @@ if WEB_MODE:
             display: flex;
             flex-direction: column;
             overflow: hidden;
-            transition: transform 0.3s ease;
+            transition: transform 0.3s ease, background 0.3s ease, border-color 0.3s ease;
+        }
+        
+        body.dark-mode .sidebar {
+            background: #252538;
+            border-left-color: #3a3a4a;
         }
         
         .sidebar.collapsed {
@@ -342,6 +358,11 @@ if WEB_MODE:
             display: flex;
             justify-content: space-between;
             align-items: center;
+            transition: background 0.3s ease;
+        }
+        
+        body.dark-mode .sidebar-header {
+            background: linear-gradient(135deg, #4a4a6a 0%, #5a5a7a 100%);
         }
         
         .sidebar-header h3 {
@@ -375,10 +396,20 @@ if WEB_MODE:
             border-radius: 8px;
             font-size: 14px;
             outline: none;
-            transition: border-color 0.3s;
+            transition: border-color 0.3s, background 0.3s ease, color 0.3s ease;
         }
         
         .sidebar-search input:focus {
+            border-color: #667eea;
+        }
+        
+        body.dark-mode .sidebar-search input {
+            background: #1e1e2e;
+            border-color: #3a3a4a;
+            color: #e0e0e0;
+        }
+        
+        body.dark-mode .sidebar-search input:focus {
             border-color: #667eea;
         }
         
@@ -400,6 +431,11 @@ if WEB_MODE:
             display: flex;
             align-items: center;
             gap: 8px;
+            transition: color 0.3s ease;
+        }
+        
+        body.dark-mode .feature-category-title {
+            color: #e0e0e0;
         }
         
         .feature-card {
@@ -409,13 +445,23 @@ if WEB_MODE:
             padding: 12px;
             margin-bottom: 8px;
             cursor: pointer;
-            transition: all 0.2s;
+            transition: all 0.2s, background 0.3s ease, border-color 0.3s ease;
         }
         
         .feature-card:hover {
             border-color: #667eea;
             box-shadow: 0 2px 8px rgba(102, 126, 234, 0.2);
             transform: translateY(-1px);
+        }
+        
+        body.dark-mode .feature-card {
+            background: #2a2a3e;
+            border-color: #3a3a4a;
+        }
+        
+        body.dark-mode .feature-card:hover {
+            border-color: #667eea;
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.3);
         }
         
         .feature-card-title {
@@ -426,12 +472,22 @@ if WEB_MODE:
             display: flex;
             align-items: center;
             gap: 8px;
+            transition: color 0.3s ease;
+        }
+        
+        body.dark-mode .feature-card-title {
+            color: #e0e0e0;
         }
         
         .feature-card-description {
             font-size: 12px;
             color: #666;
             margin-bottom: 8px;
+            transition: color 0.3s ease;
+        }
+        
+        body.dark-mode .feature-card-description {
+            color: #a0a0a0;
         }
         
         .feature-card-example {
@@ -441,6 +497,12 @@ if WEB_MODE:
             padding: 6px 8px;
             border-radius: 4px;
             font-style: italic;
+            transition: color 0.3s ease, background 0.3s ease;
+        }
+        
+        body.dark-mode .feature-card-example {
+            color: #8a8aff;
+            background: #1a1a2e;
         }
         
         .feature-badge {
@@ -486,11 +548,36 @@ if WEB_MODE:
             transform: translateY(-50%) scale(1.05);
         }
         
+        .theme-toggle {
+            position: fixed;
+            right: 20px;
+            top: calc(50% - 60px);
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            padding: 12px 16px;
+            cursor: pointer;
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.2);
+            z-index: 1000;
+            font-size: 16px;
+            transition: all 0.3s;
+        }
+        
+        .theme-toggle:hover {
+            transform: scale(1.05);
+        }
+        
         .header {
             background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             padding: 20px;
             text-align: center;
+            transition: background 0.3s ease;
+        }
+        
+        body.dark-mode .header {
+            background: linear-gradient(135deg, #4a4a6a 0%, #5a5a7a 100%);
         }
         
         .header h1 {
@@ -508,6 +595,11 @@ if WEB_MODE:
             overflow-y: auto;
             padding: 20px;
             background: #f8f9fa;
+            transition: background 0.3s ease;
+        }
+        
+        body.dark-mode .chat-container {
+            background: #1e1e2e;
         }
         
         .message {
@@ -546,6 +638,13 @@ if WEB_MODE:
             background: white;
             color: #333;
             box-shadow: 0 2px 8px rgba(0, 0, 0, 0.1);
+            transition: background 0.3s ease, color 0.3s ease, box-shadow 0.3s ease;
+        }
+        
+        body.dark-mode .message.assistant .message-content {
+            background: #2a2a3e;
+            color: #e0e0e0;
+            box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
         }
         
         .metrics {
@@ -556,27 +655,45 @@ if WEB_MODE:
             background: #e9ecef;
             border-radius: 8px;
             display: inline-block;
+            transition: color 0.3s ease, background 0.3s ease;
+        }
+        
+        body.dark-mode .metrics {
+            color: #a0a0a0;
+            background: #3a3a4a;
         }
         
         .message-time {
             font-size: 11px;
-            color: #888;
+            color: #666;
             margin-top: 6px;
             padding: 4px 8px;
             background: rgba(0, 0, 0, 0.05);
             border-radius: 4px;
             display: inline-block;
+            transition: color 0.3s ease, background 0.3s ease;
+        }
+        
+        body.dark-mode .message-time {
+            color: #a0a0a0;
+            background: rgba(255, 255, 255, 0.1);
         }
         
         .message.user .message-time {
             background: rgba(255, 255, 255, 0.2);
-            color: rgba(255, 255, 255, 0.9);
+            color: rgba(255, 255, 255, 0.95);
         }
         
         .input-container {
             padding: 20px;
             background: white;
             border-top: 1px solid #e9ecef;
+            transition: background 0.3s ease, border-color 0.3s ease;
+        }
+        
+        body.dark-mode .input-container {
+            background: #1e1e2e;
+            border-top-color: #3a3a4a;
         }
         
         .input-wrapper {
@@ -591,10 +708,20 @@ if WEB_MODE:
             border-radius: 8px;
             font-size: 14px;
             outline: none;
-            transition: border-color 0.3s;
+            transition: border-color 0.3s, background 0.3s ease, color 0.3s ease;
         }
         
         #user-input:focus {
+            border-color: #667eea;
+        }
+        
+        body.dark-mode #user-input {
+            background: #2a2a3e;
+            border-color: #3a3a4a;
+            color: #e0e0e0;
+        }
+        
+        body.dark-mode #user-input:focus {
             border-color: #667eea;
         }
         
@@ -605,19 +732,21 @@ if WEB_MODE:
             border: none;
             border-radius: 8px;
             font-size: 14px;
-            font-weight: 600;
             cursor: pointer;
-            transition: transform 0.2s;
+            transition: opacity 0.2s, background 0.3s ease;
         }
         
         #send-button:hover {
-            transform: scale(1.05);
+            opacity: 0.9;
         }
         
         #send-button:disabled {
-            opacity: 0.6;
+            opacity: 0.5;
             cursor: not-allowed;
-            transform: none;
+        }
+        
+        body.dark-mode #send-button {
+            background: linear-gradient(135deg, #4a4a6a 0%, #5a5a7a 100%);
         }
         
         .suggestions {
@@ -639,6 +768,15 @@ if WEB_MODE:
         
         .suggestion:hover {
             background: #e0e0e0;
+        }
+        
+        body.dark-mode .suggestion {
+            background: #3a3a4a;
+            color: #e0e0e0;
+        }
+        
+        body.dark-mode .suggestion:hover {
+            background: #4a4a5a;
         }
         
         .scan-panel {
@@ -716,6 +854,7 @@ if WEB_MODE:
 </head>
 <body>
     <button class="toggle-sidebar" onclick="toggleSidebar()">📚 Features</button>
+    <button class="theme-toggle" onclick="toggleTheme()">🌙</button>
     
     <div class="container">
         <div class="main-content">
@@ -1157,6 +1296,28 @@ if WEB_MODE:
                 toggleSidebar();
                 localStorage.setItem('sidebarVisited', 'true');
             }, 1000);
+        }
+        
+        // ---- Theme Toggle ----
+        function toggleTheme() {
+            const body = document.body;
+            const themeBtn = document.querySelector('.theme-toggle');
+            
+            body.classList.toggle('dark-mode');
+            
+            if (body.classList.contains('dark-mode')) {
+                themeBtn.textContent = '☀️';
+                localStorage.setItem('darkMode', 'true');
+            } else {
+                themeBtn.textContent = '🌙';
+                localStorage.setItem('darkMode', 'false');
+            }
+        }
+        
+        // Load saved theme preference
+        if (localStorage.getItem('darkMode') === 'true') {
+            document.body.classList.add('dark-mode');
+            document.querySelector('.theme-toggle').textContent = '☀️';
         }
 
         // ---- Scan Progress Monitor ----
