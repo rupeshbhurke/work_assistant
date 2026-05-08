@@ -220,6 +220,7 @@ if WEB_MODE:
         cost: str
         model: str
         conversation_id: int = None
+        created_at: str = None
     
     HTML_TEMPLATE = """
 <!DOCTYPE html>
@@ -327,6 +328,21 @@ if WEB_MODE:
             background: #e9ecef;
             border-radius: 8px;
             display: inline-block;
+        }
+        
+        .message-time {
+            font-size: 11px;
+            color: #888;
+            margin-top: 6px;
+            padding: 4px 8px;
+            background: rgba(0, 0, 0, 0.05);
+            border-radius: 4px;
+            display: inline-block;
+        }
+        
+        .message.user .message-time {
+            background: rgba(255, 255, 255, 0.2);
+            color: rgba(255, 255, 255, 0.9);
         }
         
         .input-container {
@@ -530,11 +546,26 @@ if WEB_MODE:
         const sendButton = document.getElementById('send-button');
         const loading = document.getElementById('loading');
         
-        function addMessage(content, isUser, metrics = null) {
+        function addMessage(content, isUser, metrics = null, timestamp = null) {
             const messageDiv = document.createElement('div');
             messageDiv.className = `message ${isUser ? 'user' : 'assistant'}`;
             
             let html = `<div class="message-content">${content}</div>`;
+            
+            // Add timestamp if provided
+            if (timestamp) {
+                const date = new Date(timestamp);
+                const localDate = date.toLocaleDateString(undefined, { 
+                    month: 'short', 
+                    day: 'numeric', 
+                    year: 'numeric' 
+                });
+                const localTime = date.toLocaleTimeString(undefined, { 
+                    hour: '2-digit', 
+                    minute: '2-digit' 
+                });
+                html += `<div class="message-time">🕐 ${localDate} at ${localTime}</div>`;
+            }
             
             if (metrics && !isUser) {
                 html += `
@@ -559,7 +590,9 @@ if WEB_MODE:
             sendButton.disabled = true;
             loading.classList.add('active');
             
-            addMessage(message, true);
+            // Add user message with current timestamp
+            const userTimestamp = new Date().toISOString();
+            addMessage(message, true, null, userTimestamp);
             
             try {
                 const response = await fetch('/chat', {
@@ -578,7 +611,7 @@ if WEB_MODE:
                     output_tokens: data.output_tokens,
                     total_tokens: data.total_tokens,
                     cost: data.cost
-                });
+                }, data.created_at);
                 
                 // Check for job_id in response to auto-start scan monitor
                 if (typeof data.response === 'string') {
@@ -620,7 +653,7 @@ if WEB_MODE:
                         total_tokens: msg.total_tokens,
                         cost: msg.cost
                     };
-                    addMessage(msg.content, msg.is_user, metrics);
+                    addMessage(msg.content, msg.is_user, metrics, msg.created_at);
                 });
             } catch (error) {
                 console.error('Failed to load chat history:', error);
@@ -829,7 +862,8 @@ if WEB_MODE:
             total_tokens=total_tokens,
             cost=format_cost(cost),
             model=response.model,
-            conversation_id=conversation_id
+            conversation_id=conversation_id,
+            created_at=response_time.isoformat() if response_time else None
         )
     
     @app.get("/chat/history")
