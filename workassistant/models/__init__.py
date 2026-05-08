@@ -8,6 +8,7 @@ from workassistant.models.ai_api_call import AIApiCall
 from workassistant.models.commit_summary import CommitSummary
 from workassistant.models.file_index import FileIndex
 from workassistant.models.scan_job import ScanJob
+from workassistant.models.project_scan_job import ProjectScanJob
 from workassistant.models.project_graph import ProjectGraph
 from workassistant.models.chat_message import ChatMessage
 from workassistant.models.conversation import Conversation
@@ -23,6 +24,7 @@ __all__ = [
     "CommitSummary",
     "FileIndex",
     "ScanJob",
+    "ProjectScanJob",
     "ProjectGraph",
     "ChatMessage",
     "Conversation",

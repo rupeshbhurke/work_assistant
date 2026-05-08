@@ -116,33 +116,66 @@ class ScanJobManager:
         location_id: int,
         incremental: bool,
     ) -> None:
-        logger.info(f"Running scan job {job_id}")
-        await self._update_job(job_id, status="running")
-
-        async def progress_cb(progress: dict) -> None:
-            await self._update_job(
-                job_id,
-                phase=progress.get("phase"),
-                progress_percent=progress.get("progress_percent", 0),
-                current_project=progress.get("current_project"),
-                projects_total=progress.get("projects_total"),
-                projects_processed=progress.get("projects_processed", 0),
-                commits_total=progress.get("commits_total"),
-                commits_processed=progress.get("commits_processed", 0),
-                files_total=progress.get("files_total"),
-                files_processed=progress.get("files_processed", 0),
-            )
-            await websocket_manager.broadcast(job_id, progress)
+        logger.info(f"Running hierarchical scan job {job_id}")
+        await self._update_job(job_id, status="running", phase="discovery")
 
         try:
-            scanner = ProjectScanner(
-                location_id=location_id,
-                worker_id=0,
-                progress_callback=progress_cb,
-                incremental=incremental,
+            # Phase 1: Discovery - find all projects
+            from pathlib import Path
+            from workassistant.models.project_location import ProjectLocation
+            
+            async with async_session_maker() as session:
+                result = await session.execute(
+                    select(ProjectLocation).where(ProjectLocation.id == location_id)
+                )
+                location = result.scalar_one_or_none()
+                if not location:
+                    raise Exception(f"Location {location_id} not found")
+                
+                root = Path(location.path).expanduser().resolve()
+                if not root.exists():
+                    raise Exception(f"Location path does not exist: {root}")
+            
+            # Discover projects
+            logger.info(f"Discovering projects at {root}")
+            discovered_projects = await self._discover_projects(root)
+            
+            await self._update_job(
+                job_id,
+                phase="spawning",
+                progress_percent=20,
+                projects_total=len(discovered_projects),
             )
-            result = await scanner.run()
-
+            
+            logger.info(f"Discovered {len(discovered_projects)} projects, spawning child jobs")
+            
+            # Phase 2: Spawn project scan jobs
+            from workassistant.jobs.project_scan_job_manager import project_scan_job_manager
+            
+            project_job_ids = []
+            for project in discovered_projects:
+                child_job_id = await project_scan_job_manager.start_project_scan(
+                    parent_job_id=job_id,
+                    project_path=project["path"],
+                    project_name=project["name"],
+                    project_type=project["project_type"],
+                )
+                project_job_ids.append(child_job_id)
+            
+            await self._update_job(
+                job_id,
+                phase="monitoring",
+                progress_percent=30,
+            )
+            
+            logger.info(f"Spawned {len(project_job_ids)} child jobs, monitoring progress")
+            
+            # Phase 3: Monitor child jobs until completion
+            await self._monitor_child_jobs(job_id, project_job_ids)
+            
+            # Phase 4: Aggregate results
+            result_summary = await self._aggregate_results(job_id)
+            
             end_time = datetime.now(timezone.utc)
             await self._update_job(
                 job_id,
@@ -150,10 +183,10 @@ class ScanJobManager:
                 progress_percent=100,
                 phase="done",
                 end_time=end_time,
-                result_summary=result,
+                result_summary=result_summary,
             )
-            logger.info(f"Scan job {job_id} completed: {result}")
-            final = {"status": "completed", "progress_percent": 100, "result_summary": result}
+            logger.info(f"Hierarchical scan job {job_id} completed: {result_summary}")
+            final = {"status": "completed", "progress_percent": 100, "result_summary": result_summary}
             await websocket_manager.broadcast(job_id, final)
 
         except asyncio.CancelledError:
@@ -169,6 +202,114 @@ class ScanJobManager:
             )
             err_payload = {"status": "failed", "error_message": str(exc)}
             await websocket_manager.broadcast(job_id, err_payload)
+
+    # ------------------------------------------------------------------
+    # Hierarchical job helpers
+    # ------------------------------------------------------------------
+
+    async def _discover_projects(self, root: Path) -> list:
+        """Discover all projects in a location."""
+        from workassistant.config import SCAN_IGNORE_PATTERNS
+        
+        discovered = []
+        
+        def walk_directories(path: Path):
+            """Recursively find projects."""
+            try:
+                entries = [e for e in path.iterdir() if e.is_dir() and not e.is_symlink()]
+            except (PermissionError, OSError):
+                return
+            
+            for entry in entries:
+                if entry.name.startswith("."):
+                    continue
+                if any(pat.strip() and entry.name == pat.strip() for pat in SCAN_IGNORE_PATTERNS):
+                    continue
+                
+                if (entry / ".git").exists():
+                    discovered.append({
+                        "path": str(entry),
+                        "name": entry.name,
+                        "project_type": "git"
+                    })
+                else:
+                    # Check if this has sub-git repos
+                    has_sub_git = any(
+                        (sub / ".git").exists()
+                        for sub in entry.iterdir()
+                        if sub.is_dir() and not sub.name.startswith(".")
+                    ) if entry.is_dir() else False
+                    
+                    if has_sub_git:
+                        walk_directories(entry)
+                    else:
+                        discovered.append({
+                            "path": str(entry),
+                            "name": entry.name,
+                            "project_type": "plain"
+                        })
+        
+        walk_directories(root)
+        return discovered
+
+    async def _monitor_child_jobs(self, parent_job_id: str, child_job_ids: list) -> None:
+        """Monitor child jobs until all complete."""
+        from workassistant.models.project_scan_job import ProjectScanJob
+        
+        while True:
+            async with async_session_maker() as session:
+                # Get current status of all child jobs
+                result = await session.execute(
+                    select(ProjectScanJob).where(
+                        ProjectScanJob.parent_job_id == parent_job_id
+                    )
+                )
+                children = result.scalars().all()
+                
+                if not children:
+                    break
+                
+                # Check if all are done
+                statuses = [c.status for c in children]
+                if all(s in ("completed", "failed", "cancelled") for s in statuses):
+                    break
+                
+                # Calculate overall progress
+                total_progress = sum(c.progress_percent for c in children)
+                avg_progress = int(30 + (total_progress / len(children)) * 0.7) if children else 30
+                
+                await self._update_job(
+                    parent_job_id,
+                    progress_percent=avg_progress,
+                )
+            
+            # Wait before checking again
+            await asyncio.sleep(2)
+
+    async def _aggregate_results(self, parent_job_id: str) -> dict:
+        """Aggregate results from all child jobs."""
+        from workassistant.models.project_scan_job import ProjectScanJob
+        
+        async with async_session_maker() as session:
+            result = await session.execute(
+                select(ProjectScanJob).where(
+                    ProjectScanJob.parent_job_id == parent_job_id
+                )
+            )
+            children = result.scalars().all()
+            
+            summary = {
+                "total_projects": len(children),
+                "completed": sum(1 for c in children if c.status == "completed"),
+                "failed": sum(1 for c in children if c.status == "failed"),
+                "cancelled": sum(1 for c in children if c.status == "cancelled"),
+                "total_commits": sum(c.commits_processed or 0 for c in children),
+                "total_files": sum(c.files_processed or 0 for c in children),
+                "total_duration": sum(c.duration_seconds or 0 for c in children),
+                "errors": [c.error_message for c in children if c.error_message],
+            }
+            
+            return summary
 
     # ------------------------------------------------------------------
     # Helpers
